@@ -186,41 +186,6 @@ const transformBlock = (node: any, config: DocxStyleConfig, imageMap: Map<string
     case 'blockquote':
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return node.children.flatMap((child: any) => {
-          const subNodes = transformBlock(child, config, imageMap);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return subNodes.map((sn: any) => {
-             if (sn instanceof Paragraph) {
-                 return new Paragraph({
-                     // @ts-ignore - copying children from generated paragraph
-                     children: sn.options.children.map(child => {
-                        // Apply blockquote text color to text runs
-                        if (child instanceof TextRun) {
-                          // We need a way to clone/modify, but `docx` objects are immutable-ish in construction.
-                          // It's safer to reconstruct. For now, we rely on the fact that transformInline 
-                          // was called already.
-                          // We can override the color of the generated text runs? 
-                          // This is hard without re-running transformInline. 
-                          // A cleaner way: pass blockquote color context down to transformBlock -> transformInline?
-                          // For simplicity, we assume default body color was used and leave it, 
-                          // OR we accept that we might not change existing TextRun color easily here.
-                          return child; 
-                        }
-                        return child;
-                     }), 
-                     indent: { left: 400 },
-                     border: { left: { style: BorderStyle.SINGLE, size: 24, color: getColor(config.blockquote.border) } },
-                     shading: { fill: getColor(config.blockquote.background), type: ShadingType.CLEAR },
-                     spacing: { after: 120 }
-                 })
-             }
-             return sn;
-          });
-      });
-      
-      // RE-IMPLEMENTING BLOCKQUOTE TO SUPPORT TEXT COLOR:
-      // We need to re-traverse children with the override color.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const blockquoteNodes = node.children.flatMap((child: any) => {
           // If child is paragraph, we want its text to use blockquote text color
           if (child.type === 'paragraph') {
              const children = child.children.flatMap((c: any) => 
@@ -238,8 +203,6 @@ const transformBlock = (node: any, config: DocxStyleConfig, imageMap: Map<string
           // We'll fallback to standard transform for non-paragraph direct children for now.
           return transformBlock(child, config, imageMap);
       });
-      return blockquoteNodes;
-
 
     case 'code':
       // Block code
@@ -286,36 +249,37 @@ const transformBlock = (node: any, config: DocxStyleConfig, imageMap: Map<string
              return transformBlock(itemChild, config, imageMap, { level: currentLevel, ordered: itemChild.ordered });
            }
 
-           const blocks = transformBlock(itemChild, config, imageMap);
-           
-           if (idx === 0 && blocks.length > 0 && blocks[0] instanceof Paragraph) {
-             const firstPara = blocks[0] as Paragraph;
-             
-             if (prefix) {
-                // @ts-ignore - Injecting run at start
-                firstPara.options.children.unshift(prefix);
-             }
+           // Check if first child is a paragraph to apply list styling directly
+           if (idx === 0 && itemChild.type === 'paragraph') {
+               // Manually transform the paragraph contents to apply numbering
+               const children = itemChild.children.flatMap((child: any) => transformInline(child, config, imageMap));
+               
+               if (prefix) {
+                   children.unshift(prefix);
+               }
 
-             if (checked === null) {
-                 return new Paragraph({
-                   // @ts-ignore
-                   children: firstPara.options.children,
-                   numbering: {
-                     reference: isOrdered ? "default-numbered" : "default-bullet",
-                     level: currentLevel
-                   },
-                   spacing: { after: 120 }
-                 });
-             } else {
-                 return new Paragraph({
-                    // @ts-ignore
-                    children: firstPara.options.children,
-                    indent: { left: convertInchesToTwip((currentLevel + 1) * 0.25) },
-                    spacing: { after: 120 }
-                 });
-             }
+               if (checked === null) {
+                   // Standard list item
+                   return new Paragraph({
+                       children: children,
+                       numbering: {
+                           reference: isOrdered ? "default-numbered" : "default-bullet",
+                           level: currentLevel
+                       },
+                       spacing: { after: 120 }
+                   });
+               } else {
+                   // Checklist item (no numbering, just indentation + checkbox)
+                   return new Paragraph({
+                       children: children,
+                       indent: { left: convertInchesToTwip((currentLevel + 1) * 0.25) },
+                       spacing: { after: 120 }
+                   });
+               }
            }
-           return blocks;
+           
+           // Fallback for non-paragraph first items or subsequent items
+           return transformBlock(itemChild, config, imageMap);
         });
       });
 
