@@ -10,227 +10,460 @@ import {
   WidthType, 
   BorderStyle,
   ShadingType,
-  AlignmentType
+  AlignmentType,
+  ExternalHyperlink,
+  ImageRun,
+  LevelFormat,
+  convertInchesToTwip
 } from "docx";
 import saveAs from "file-saver";
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+import remarkGfm from "remark-gfm";
+import { DocxStyleConfig, DEFAULT_STYLE_CONFIG } from "../types";
+
+// --- HELPERS ---
+const getColor = (hex: string) => hex.replace('#', '');
 
 /**
- * Enhanced Markdown to Docx parser with Styled Components.
- * Matches the Preview visual style (Tailwind Typography).
+ * Fetch image blob from URL.
+ * Note: Browser CORS policies often block direct fetching of external images.
+ * This is a best-effort implementation.
  */
-export const generateDocx = async (markdown: string, filename: string = "document.docx") => {
-  const lines = markdown.split('\n');
-  const docChildren: (Paragraph | Table)[] = [];
+const fetchImageBlob = async (url: string): Promise<ArrayBuffer | null> => {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return await response.arrayBuffer();
+  } catch (e) {
+    console.warn(`Failed to fetch image: ${url}`, e);
+    return null;
+  }
+};
 
-  // STATE MACHINE
-  let inCodeBlock = false;
-  let codeBuffer: string[] = [];
+interface TextStyle {
+  bold?: boolean;
+  italics?: boolean;
+  strike?: boolean;
+}
+
+interface StyleOverrides {
+  color?: string;
+  font?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  shading?: any;
+}
+
+// --- AST TRANSFORMER ---
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const transformInline = (
+  node: any, 
+  config: DocxStyleConfig, 
+  imageMap: Map<string, ArrayBuffer>, 
+  style: TextStyle = {},
+  overrides: StyleOverrides = {}
+): (TextRun | ExternalHyperlink | ImageRun)[] => {
   
-  let inTable = false;
-  let tableRows: string[] = [];
+  // Default values fall back to config body if no override provided
+  const effectiveFont = overrides.font || config.font.body;
+  const effectiveColor = overrides.color || getColor(config.typography.body);
 
-  // --- HELPERS ---
+  switch (node.type) {
+    case 'text':
+      return [new TextRun({ 
+        text: node.value, 
+        font: effectiveFont,
+        color: effectiveColor,
+        bold: style.bold,
+        italics: style.italics,
+        strike: style.strike,
+        shading: overrides.shading
+      })];
+    
+    case 'emphasis': // Italic
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return node.children.flatMap((child: any) => 
+        transformInline(child, config, imageMap, { ...style, italics: true }, overrides)
+      );
 
-  const flushCodeBlock = () => {
-    if (codeBuffer.length > 0) {
-      docChildren.push(new Paragraph({
+    case 'strong': // Bold
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return node.children.flatMap((child: any) => 
+        transformInline(child, config, imageMap, { ...style, bold: true }, overrides)
+      );
+
+    case 'delete': // Strikethrough
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return node.children.flatMap((child: any) => 
+        transformInline(child, config, imageMap, { ...style, strike: true }, overrides)
+      );
+
+    case 'inlineCode':
+      return [new TextRun({
+        text: node.value,
+        font: config.font.code,
+        size: config.sizes.code * 2, // docx uses half-points
+        color: getColor(config.inlineCode.color), 
+        shading: { fill: getColor(config.inlineCode.background), type: ShadingType.CLEAR, color: "auto" } 
+      })];
+
+    case 'link':
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // Links should have specific color, usually blue.
+      const linkOverrides = { ...overrides, color: getColor(config.typography.link) };
+      
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const linkChildren = node.children.flatMap((child: any) => 
+        transformInline(child, config, imageMap, style, linkOverrides)
+      );
+      return [new ExternalHyperlink({
+        children: linkChildren,
+        link: node.url
+      })];
+
+    case 'image':
+      const buffer = imageMap.get(node.url);
+      if (buffer) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return [new ImageRun({
+          data: buffer,
+          transformation: {
+            width: 400, // standard width
+            height: 300 // placeholder height, real implementation would read aspect ratio
+          }
+        } as any)];
+      } else {
+        // Fallback if image fails to load
+        return [new TextRun({
+          text: `[Image: ${node.alt || 'No Alt'}]`,
+          color: "64748B",
+          italics: true,
+          font: effectiveFont
+        })];
+      }
+
+    default:
+      console.warn('Unknown inline node type:', node.type);
+      return [new TextRun({ text: "" })];
+  }
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const transformBlock = (node: any, config: DocxStyleConfig, imageMap: Map<string, ArrayBuffer>, listContext?: { level: number, ordered: boolean }): (Paragraph | Table)[] => {
+  switch (node.type) {
+    case 'heading':
+      const level = Math.min(Math.max(node.depth, 1), 6);
+      
+      // Determine specific styles for headings
+      let headingColor = getColor(config.typography.body);
+      if (level === 1) headingColor = getColor(config.typography.heading1);
+      else if (level === 2) headingColor = getColor(config.typography.heading2);
+      else if (level === 3) headingColor = getColor(config.typography.heading3);
+      else if (level === 4) headingColor = getColor(config.typography.heading4);
+      else if (level === 5) headingColor = getColor(config.typography.heading5);
+      else if (level === 6) headingColor = getColor(config.typography.heading6);
+      
+      const headingFont = config.font.heading;
+
+      return [new Paragraph({
+        heading: Object.values(HeadingLevel)[level - 1],
+        children: node.children.flatMap((child: any) => 
+          transformInline(child, config, imageMap, {}, { color: headingColor, font: headingFont })
+        ),
+        spacing: { before: 240, after: 120 },
+        border: level === 1 || level === 2 ? {
+            bottom: { style: BorderStyle.SINGLE, size: 4, space: 1, color: "E2E8F0" }
+        } : undefined
+      })];
+
+    case 'paragraph':
+      return [new Paragraph({
+        children: node.children.flatMap((child: any) => transformInline(child, config, imageMap)),
+        spacing: { after: 200 }
+      })];
+
+    case 'blockquote':
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return node.children.flatMap((child: any) => {
+          const subNodes = transformBlock(child, config, imageMap);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return subNodes.map((sn: any) => {
+             if (sn instanceof Paragraph) {
+                 return new Paragraph({
+                     // @ts-ignore - copying children from generated paragraph
+                     children: sn.options.children.map(child => {
+                        // Apply blockquote text color to text runs
+                        if (child instanceof TextRun) {
+                          // We need a way to clone/modify, but `docx` objects are immutable-ish in construction.
+                          // It's safer to reconstruct. For now, we rely on the fact that transformInline 
+                          // was called already.
+                          // We can override the color of the generated text runs? 
+                          // This is hard without re-running transformInline. 
+                          // A cleaner way: pass blockquote color context down to transformBlock -> transformInline?
+                          // For simplicity, we assume default body color was used and leave it, 
+                          // OR we accept that we might not change existing TextRun color easily here.
+                          return child; 
+                        }
+                        return child;
+                     }), 
+                     indent: { left: 400 },
+                     border: { left: { style: BorderStyle.SINGLE, size: 24, color: getColor(config.blockquote.border) } },
+                     shading: { fill: getColor(config.blockquote.background), type: ShadingType.CLEAR },
+                     spacing: { after: 120 }
+                 })
+             }
+             return sn;
+          });
+      });
+      
+      // RE-IMPLEMENTING BLOCKQUOTE TO SUPPORT TEXT COLOR:
+      // We need to re-traverse children with the override color.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const blockquoteNodes = node.children.flatMap((child: any) => {
+          // If child is paragraph, we want its text to use blockquote text color
+          if (child.type === 'paragraph') {
+             const children = child.children.flatMap((c: any) => 
+                transformInline(c, config, imageMap, {}, { color: getColor(config.blockquote.textColor) })
+             );
+             return new Paragraph({
+                 children: children,
+                 indent: { left: 400 },
+                 border: { left: { style: BorderStyle.SINGLE, size: 24, color: getColor(config.blockquote.border) } },
+                 shading: { fill: getColor(config.blockquote.background), type: ShadingType.CLEAR },
+                 spacing: { after: 120 }
+             });
+          }
+          // For other blocks nested in blockquote (like lists), it's complex. 
+          // We'll fallback to standard transform for non-paragraph direct children for now.
+          return transformBlock(child, config, imageMap);
+      });
+      return blockquoteNodes;
+
+
+    case 'code':
+      // Block code
+      return [new Paragraph({
         children: [new TextRun({
-          text: codeBuffer.join('\n'),
-          font: "Consolas", // Monospace font
-          size: 20, // 10pt
-          color: "F8FAFC" // Light Text (Slate 50)
+          text: node.value,
+          font: config.font.code,
+          size: config.sizes.code * 2, // docx uses half-points
+          color: getColor(config.codeBlock.text)
         })],
-        shading: {
-          type: ShadingType.CLEAR,
-          fill: "1E293B", // Dark Background (Slate 800)
-        },
+        shading: { fill: getColor(config.codeBlock.background), type: ShadingType.CLEAR },
         border: {
-          top: { style: BorderStyle.SINGLE, size: 1, color: "1E293B" },
-          bottom: { style: BorderStyle.SINGLE, size: 1, color: "1E293B" },
-          left: { style: BorderStyle.SINGLE, size: 1, color: "1E293B" },
-          right: { style: BorderStyle.SINGLE, size: 1, color: "1E293B" },
+          top: { style: BorderStyle.SINGLE, size: 1, color: getColor(config.codeBlock.background) },
+          bottom: { style: BorderStyle.SINGLE, size: 1, color: getColor(config.codeBlock.background) },
+          left: { style: BorderStyle.SINGLE, size: 1, color: getColor(config.codeBlock.background) },
+          right: { style: BorderStyle.SINGLE, size: 1, color: getColor(config.codeBlock.background) },
         },
-        spacing: { before: 200, after: 200 },
-        indent: { left: 200, right: 200, firstLine: 0 } // Indent for block effect
-      }));
-    }
-    codeBuffer = [];
-    inCodeBlock = false;
-  };
+        indent: { left: 200, right: 200 },
+        spacing: { before: 200, after: 200 }
+      })];
 
-  const flushTable = () => {
-    if (tableRows.length > 0) {
-      // Filter out the delimiter row (e.g. |---|---|)
-      const validRows = tableRows.filter(row => {
-        const stripped = row.replace(/[|\-:\s]/g, '');
-        return stripped.length > 0;
+    case 'thematicBreak': // Horizontal Rule
+      return [new Paragraph({
+        border: { bottom: { style: BorderStyle.SINGLE, size: 6, space: 1, color: getColor(config.thematicBreak.color) } },
+        spacing: { before: 240, after: 240 }
+      })];
+
+    case 'list':
+      const isOrdered = node.ordered;
+      // Flatten list items
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return node.children.flatMap((listItem: any) => {
+        const currentLevel = listContext ? listContext.level + 1 : 0;
+        
+        // Handle Checked/Unchecked Task Lists (gfm)
+        const checked = listItem.checked; // null, true, or false
+        let prefix: TextRun | null = null;
+        if (checked === true) prefix = new TextRun({ text: "☑ ", font: "Segoe UI Symbol" });
+        if (checked === false) prefix = new TextRun({ text: "☐ ", font: "Segoe UI Symbol" });
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return listItem.children.flatMap((itemChild: any, idx: number) => {
+           if (itemChild.type === 'list') {
+             return transformBlock(itemChild, config, imageMap, { level: currentLevel, ordered: itemChild.ordered });
+           }
+
+           const blocks = transformBlock(itemChild, config, imageMap);
+           
+           if (idx === 0 && blocks.length > 0 && blocks[0] instanceof Paragraph) {
+             const firstPara = blocks[0] as Paragraph;
+             
+             if (prefix) {
+                // @ts-ignore - Injecting run at start
+                firstPara.options.children.unshift(prefix);
+             }
+
+             if (checked === null) {
+                 return new Paragraph({
+                   // @ts-ignore
+                   children: firstPara.options.children,
+                   numbering: {
+                     reference: isOrdered ? "default-numbered" : "default-bullet",
+                     level: currentLevel
+                   },
+                   spacing: { after: 120 }
+                 });
+             } else {
+                 return new Paragraph({
+                    // @ts-ignore
+                    children: firstPara.options.children,
+                    indent: { left: convertInchesToTwip((currentLevel + 1) * 0.25) },
+                    spacing: { after: 120 }
+                 });
+             }
+           }
+           return blocks;
+        });
       });
 
-      if (validRows.length > 0) {
-        const rows = validRows.map((rowStr, rowIndex) => {
-          const isHeader = rowIndex === 0; // Assume first row is header
-          const cellsRaw = rowStr.split('|');
-          
-          const cells = cellsRaw.filter((c, i) => {
-             if (i === 0 && c.trim() === '') return false;
-             if (i === cellsRaw.length - 1 && c.trim() === '') return false;
-             return true;
-          }).map(c => c.trim());
+    case 'table':
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rows = node.children.map((row: any, rowIndex: number) => {
+        const isHeader = rowIndex === 0;
+        
+        // Prepare overrides for header cells
+        const overrides: StyleOverrides = isHeader 
+          ? { color: getColor(config.table.headerText) }
+          : {};
 
-          return new TableRow({
-            children: cells.map(cellText => new TableCell({
-              children: [new Paragraph({ 
-                children: [new TextRun({ 
-                  text: cellText,
-                  bold: isHeader, // Bold for header
-                  color: isHeader ? "1E293B" : "334155" // Darker text for header
-                })],
-                alignment: AlignmentType.LEFT
-              })],
-              width: { size: 100 / cells.length, type: WidthType.PERCENTAGE },
-              shading: isHeader ? {
-                fill: "F1F5F9", // Light Gray Header Background (Slate 100)
-                type: ShadingType.CLEAR,
-                color: "auto" 
-              } : undefined,
-              borders: {
-                top: { style: BorderStyle.SINGLE, size: 4, color: "CBD5E1" },
-                bottom: { style: BorderStyle.SINGLE, size: 4, color: "CBD5E1" },
-                left: { style: BorderStyle.SINGLE, size: 4, color: "CBD5E1" },
-                right: { style: BorderStyle.SINGLE, size: 4, color: "CBD5E1" },
-              },
-              margins: {
-                top: 100, bottom: 100, left: 100, right: 100
-              }
-            }))
-          });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const cells = row.children.map((cell: any) => {
+           // Pass overrides to children
+           const cellContent = cell.children.flatMap((c: any) => 
+             transformInline(c, config, imageMap, {}, overrides)
+           );
+           
+           return new TableCell({
+             children: [new Paragraph({ 
+               children: cellContent,
+               alignment: isHeader ? AlignmentType.CENTER : AlignmentType.LEFT
+             })],
+             shading: isHeader ? { fill: getColor(config.table.headerBackground), type: ShadingType.CLEAR, color: "auto" } : undefined,
+             verticalAlign: "center",
+             margins: { top: 100, bottom: 100, left: 100, right: 100 },
+             borders: {
+               top: { style: BorderStyle.SINGLE, size: 1, color: getColor(config.table.borderColor) },
+               bottom: { style: BorderStyle.SINGLE, size: 1, color: getColor(config.table.borderColor) },
+               left: { style: BorderStyle.SINGLE, size: 1, color: getColor(config.table.borderColor) },
+               right: { style: BorderStyle.SINGLE, size: 1, color: getColor(config.table.borderColor) },
+             }
+           });
         });
+        return new TableRow({ children: cells });
+      });
 
-        docChildren.push(new Table({
-          rows: rows,
-          width: { size: 100, type: WidthType.PERCENTAGE },
-          // Spacing property removed as it's not supported in ITableOptions in this version of docx
-        }));
-      }
-    }
-    tableRows = [];
-    inTable = false;
-  };
-  
-  const parseInline = (text: string): TextRun[] => {
-     // Naive bold parser: **text**
-     const parts = text.split(/(\*\*.*?\*\*)/g);
-     return parts.map(part => {
-       if (part.startsWith('**') && part.endsWith('**')) {
-         return new TextRun({ text: part.slice(2, -2), bold: true });
-       }
-       return new TextRun({ text: part });
-     });
-  };
+      return [new Table({
+        rows: rows,
+        width: { size: 100, type: WidthType.PERCENTAGE },
+      })];
 
-  // --- PARSING LOOP ---
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    // 1. CODE BLOCKS (```)
-    if (trimmed.startsWith('```')) {
-      if (inCodeBlock) {
-        flushCodeBlock();
-      } else {
-        if (inTable) flushTable();
-        inCodeBlock = true;
-      }
-      continue;
-    }
-
-    if (inCodeBlock) {
-      codeBuffer.push(line);
-      continue;
-    }
-
-    // 2. TABLES
-    if (trimmed.startsWith('|')) {
-      if (!inTable) inTable = true;
-      tableRows.push(trimmed);
-      continue;
-    } else {
-      if (inTable) flushTable();
-    }
-
-    // 3. REGULAR CONTENT
-    if (!trimmed) {
-      docChildren.push(new Paragraph({ text: "" }));
-      continue;
-    }
-
-    // Heading 1-3
-    if (line.startsWith('# ')) {
-      docChildren.push(new Paragraph({
-        children: [new TextRun({ text: line.replace('# ', ''), color: "0F172A" })], // Slate 900
-        heading: HeadingLevel.HEADING_1,
-        spacing: { before: 240, after: 120 },
-      }));
-    } else if (line.startsWith('## ')) {
-      docChildren.push(new Paragraph({
-        children: [new TextRun({ text: line.replace('## ', ''), color: "1E293B" })], // Slate 800
-        heading: HeadingLevel.HEADING_2,
-        spacing: { before: 240, after: 120 },
-      }));
-    } else if (line.startsWith('### ')) {
-      docChildren.push(new Paragraph({
-        children: [new TextRun({ text: line.replace('### ', ''), color: "334155" })], // Slate 700
-        heading: HeadingLevel.HEADING_3,
-        spacing: { before: 200, after: 100 },
-      }));
-    } 
-    // Lists
-    else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-       docChildren.push(new Paragraph({
-        children: parseInline(trimmed.replace(/^[\-\*]\s+/, '')),
-        bullet: { level: 0 }
-      }));
-    }
-    // Blockquote
-    else if (trimmed.startsWith('> ')) {
-       docChildren.push(new Paragraph({
-        children: [new TextRun({ text: trimmed.replace('> ', ''), italics: true, color: "475569" })],
-        indent: { left: 400 }, // Slight indent
-        border: {
-           left: { style: BorderStyle.SINGLE, size: 24, color: "3B82F6" } // Blue Left Border
-        },
-        shading: {
-            fill: "EFF6FF", // Light Blue Background
-            type: ShadingType.CLEAR,
-        },
-        spacing: { before: 120, after: 120 }
-      }));
-    }
-    // Normal Paragraph
-    else {
-      docChildren.push(new Paragraph({
-        children: parseInline(line),
-        spacing: { after: 120 }
-      }));
-    }
+    default:
+      return [];
   }
+};
 
-  // Cleanup
-  if (inCodeBlock) flushCodeBlock();
-  if (inTable) flushTable();
 
-  // Create Document
+export const generateDocx = async (
+  markdown: string, 
+  filename: string = "document.docx",
+  config: DocxStyleConfig = DEFAULT_STYLE_CONFIG
+) => {
+  // 1. Parse Markdown to AST
+  const processor = unified().use(remarkParse).use(remarkGfm);
+  const ast = processor.parse(markdown);
+
+  // 2. Pre-fetch all images
+  const imageMap = new Map<string, ArrayBuffer>();
+  const imageUrls: string[] = [];
+  
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const findImages = (node: any) => {
+    if (node.type === 'image') imageUrls.push(node.url);
+    if (node.children) node.children.forEach(findImages);
+  };
+  findImages(ast);
+
+  await Promise.all(imageUrls.map(async (url) => {
+    const blob = await fetchImageBlob(url);
+    if (blob) imageMap.set(url, blob);
+  }));
+
+  // 3. Transform AST to Docx Nodes
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const docChildren = ast.children.flatMap((node: any) => transformBlock(node, config, imageMap));
+
+  // 4. Create Document
+  const listMarkerColor = getColor(config.list.markerColor);
+  const listFont = config.font.body;
+
   const doc = new Document({
     creator: "Markdown to Docx Pro",
     title: filename,
+    numbering: {
+      config: [
+        {
+          reference: "default-bullet",
+          levels: [
+            { level: 0, format: LevelFormat.BULLET, text: "\u2022", alignment: AlignmentType.LEFT, style: { run: { color: listMarkerColor, font: listFont }, paragraph: { indent: { left: convertInchesToTwip(0.25), hanging: convertInchesToTwip(0.125) } } } },
+            { level: 1, format: LevelFormat.BULLET, text: "\u25E6", alignment: AlignmentType.LEFT, style: { run: { color: listMarkerColor, font: listFont }, paragraph: { indent: { left: convertInchesToTwip(0.5), hanging: convertInchesToTwip(0.125) } } } },
+            { level: 2, format: LevelFormat.BULLET, text: "\u25AA", alignment: AlignmentType.LEFT, style: { run: { color: listMarkerColor, font: listFont }, paragraph: { indent: { left: convertInchesToTwip(0.75), hanging: convertInchesToTwip(0.125) } } } },
+          ],
+        },
+        {
+          reference: "default-numbered",
+          levels: [
+             { level: 0, format: LevelFormat.DECIMAL, text: "%1.", alignment: AlignmentType.LEFT, style: { run: { color: listMarkerColor, font: listFont }, paragraph: { indent: { left: convertInchesToTwip(0.25), hanging: convertInchesToTwip(0.125) } } } },
+             { level: 1, format: LevelFormat.LOWER_LETTER, text: "%2.", alignment: AlignmentType.LEFT, style: { run: { color: listMarkerColor, font: listFont }, paragraph: { indent: { left: convertInchesToTwip(0.5), hanging: convertInchesToTwip(0.125) } } } },
+          ]
+        }
+      ]
+    },
     styles: {
       paragraphStyles: [
         {
           id: "Normal",
           name: "Normal",
-          run: { size: 24, font: "Calibri", color: "334155" }, // Slate 700
+          run: { size: config.sizes.body * 2, font: config.font.body, color: getColor(config.typography.body) },
           paragraph: { spacing: { line: 276 } },
+        },
+        {
+          id: "Heading1",
+          name: "Heading 1",
+          run: { size: config.sizes.heading1 * 2, bold: true, color: getColor(config.typography.heading1), font: config.font.heading },
+          paragraph: { spacing: { before: 240, after: 120 } },
+        },
+        {
+          id: "Heading2",
+          name: "Heading 2",
+          run: { size: config.sizes.heading2 * 2, bold: true, color: getColor(config.typography.heading2), font: config.font.heading },
+          paragraph: { spacing: { before: 240, after: 120 } },
+        },
+        {
+          id: "Heading3",
+          name: "Heading 3",
+          run: { size: config.sizes.heading3 * 2, bold: true, color: getColor(config.typography.heading3), font: config.font.heading },
+          paragraph: { spacing: { before: 240, after: 120 } },
+        },
+        {
+          id: "Heading4",
+          name: "Heading 4",
+          run: { size: config.sizes.heading4 * 2, bold: true, color: getColor(config.typography.heading4), font: config.font.heading },
+          paragraph: { spacing: { before: 240, after: 120 } },
+        },
+        {
+          id: "Heading5",
+          name: "Heading 5",
+          run: { size: config.sizes.heading5 * 2, bold: true, color: getColor(config.typography.heading5), font: config.font.heading },
+          paragraph: { spacing: { before: 240, after: 120 } },
+        },
+        {
+          id: "Heading6",
+          name: "Heading 6",
+          run: { size: config.sizes.heading6 * 2, bold: true, color: getColor(config.typography.heading6), font: config.font.heading },
+          paragraph: { spacing: { before: 240, after: 120 } },
         },
       ],
     },

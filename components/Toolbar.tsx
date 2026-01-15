@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download, Layout, Columns, Eye, FileText } from 'lucide-react';
+import { Download, Layout, Columns, Eye, FileText, Settings2 } from 'lucide-react';
 import { ViewMode } from '../types';
 
 interface ToolbarProps {
@@ -7,13 +7,17 @@ interface ToolbarProps {
   setViewMode: (mode: ViewMode) => void;
   onDownload: () => void;
   hasContent: boolean;
+  onToggleSettings: () => void;
+  isSettingsOpen: boolean;
 }
 
 const Toolbar: React.FC<ToolbarProps> = ({ 
   viewMode, 
   setViewMode, 
   onDownload, 
-  hasContent
+  hasContent,
+  onToggleSettings,
+  isSettingsOpen
 }) => {
   return (
     <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between shadow-sm z-10 relative">
@@ -54,6 +58,15 @@ const Toolbar: React.FC<ToolbarProps> = ({
         </div>
 
         <div className="h-6 w-px bg-slate-200"></div>
+
+        {/* Settings Toggle */}
+        <button
+          onClick={onToggleSettings}
+          className={`p-2 rounded-lg transition-all border ${isSettingsOpen ? 'bg-slate-100 text-blue-600 border-blue-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+          title="Export Styles"
+        >
+          <Settings2 className="w-4 h-4" />
+        </button>
 
         {/* Export Action */}
         <button

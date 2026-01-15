@@ -1,8 +1,9 @@
 import React, { useState, useCallback } from 'react';
-import { ViewMode } from './types';
+import { ViewMode, DocxStyleConfig, DEFAULT_STYLE_CONFIG } from './types';
 import Editor from './components/Editor';
 import Preview from './components/Preview';
 import Toolbar from './components/Toolbar';
+import StyleSettings from './components/StyleSettings';
 import { generateDocx } from './services/docxService';
 
 const DEFAULT_MARKDOWN = `# Comprehensive Markdown Test
@@ -72,6 +73,10 @@ function add(a: number, b: number) {
 function App() {
   const [markdown, setMarkdown] = useState<string>(DEFAULT_MARKDOWN);
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.SPLIT);
+  
+  // Style Config State
+  const [styleConfig, setStyleConfig] = useState<DocxStyleConfig>(DEFAULT_STYLE_CONFIG);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Layout Logic
   const showEditor = viewMode === ViewMode.SPLIT || viewMode === ViewMode.EDITOR;
@@ -84,20 +89,30 @@ function App() {
 
   const handleDownload = useCallback(async () => {
     try {
-      await generateDocx(markdown, "my-draft.docx");
+      await generateDocx(markdown, "my-draft.docx", styleConfig);
     } catch (error) {
       console.error("Download failed", error);
       alert("Failed to generate document.");
     }
-  }, [markdown]);
+  }, [markdown, styleConfig]);
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden relative">
       <Toolbar 
         viewMode={viewMode}
         setViewMode={setViewMode}
         onDownload={handleDownload}
         hasContent={markdown.length > 0}
+        isSettingsOpen={isSettingsOpen}
+        onToggleSettings={() => setIsSettingsOpen(!isSettingsOpen)}
+      />
+
+      {/* Settings Modal */}
+      <StyleSettings 
+        isOpen={isSettingsOpen} 
+        config={styleConfig} 
+        onChange={setStyleConfig} 
+        onClose={() => setIsSettingsOpen(false)} 
       />
 
       <main className={`flex-1 grid ${getGridCols()} overflow-hidden`}>
@@ -116,6 +131,7 @@ function App() {
             <Preview 
               content={markdown} 
               visible={true} 
+              styleConfig={styleConfig}
             />
           </div>
         )}
