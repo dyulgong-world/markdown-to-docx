@@ -9,13 +9,14 @@ import {
   TableCell, 
   WidthType, 
   BorderStyle,
-  ShadingType
+  ShadingType,
+  AlignmentType
 } from "docx";
 import saveAs from "file-saver";
 
 /**
- * Enhanced Markdown to Docx parser.
- * Supports: Headings, Lists, Blockquotes, Code Blocks, and Tables.
+ * Enhanced Markdown to Docx parser with Styled Components.
+ * Matches the Preview visual style (Tailwind Typography).
  */
 export const generateDocx = async (markdown: string, filename: string = "document.docx") => {
   const lines = markdown.split('\n');
@@ -35,21 +36,22 @@ export const generateDocx = async (markdown: string, filename: string = "documen
       docChildren.push(new Paragraph({
         children: [new TextRun({
           text: codeBuffer.join('\n'),
-          font: "Courier New",
-          size: 20 // 10pt
+          font: "Consolas", // Monospace font
+          size: 20, // 10pt
+          color: "F8FAFC" // Light Text (Slate 50)
         })],
         shading: {
           type: ShadingType.CLEAR,
-          fill: "F3F4F6", // Light Gray background
+          fill: "1E293B", // Dark Background (Slate 800)
         },
         border: {
-          top: { style: BorderStyle.SINGLE, size: 1, color: "E5E7EB" },
-          bottom: { style: BorderStyle.SINGLE, size: 1, color: "E5E7EB" },
-          left: { style: BorderStyle.SINGLE, size: 1, color: "E5E7EB" },
-          right: { style: BorderStyle.SINGLE, size: 1, color: "E5E7EB" },
+          top: { style: BorderStyle.SINGLE, size: 1, color: "1E293B" },
+          bottom: { style: BorderStyle.SINGLE, size: 1, color: "1E293B" },
+          left: { style: BorderStyle.SINGLE, size: 1, color: "1E293B" },
+          right: { style: BorderStyle.SINGLE, size: 1, color: "1E293B" },
         },
         spacing: { before: 200, after: 200 },
-        indent: { left: 200, right: 200 }
+        indent: { left: 200, right: 200, firstLine: 0 } // Indent for block effect
       }));
     }
     codeBuffer = [];
@@ -60,18 +62,15 @@ export const generateDocx = async (markdown: string, filename: string = "documen
     if (tableRows.length > 0) {
       // Filter out the delimiter row (e.g. |---|---|)
       const validRows = tableRows.filter(row => {
-        // Simple check: if row contains only |, -, : and spaces, it's likely a delimiter
         const stripped = row.replace(/[|\-:\s]/g, '');
         return stripped.length > 0;
       });
 
       if (validRows.length > 0) {
-        const rows = validRows.map(rowStr => {
-          // Parse cells: split by pipe, trim whitespace
-          // Note: This matches standard GFM tables which start/end with |
+        const rows = validRows.map((rowStr, rowIndex) => {
+          const isHeader = rowIndex === 0; // Assume first row is header
           const cellsRaw = rowStr.split('|');
           
-          // Remove first/last empty elements if they exist (standard |cell| format)
           const cells = cellsRaw.filter((c, i) => {
              if (i === 0 && c.trim() === '') return false;
              if (i === cellsRaw.length - 1 && c.trim() === '') return false;
@@ -80,8 +79,20 @@ export const generateDocx = async (markdown: string, filename: string = "documen
 
           return new TableRow({
             children: cells.map(cellText => new TableCell({
-              children: [new Paragraph({ text: cellText })],
+              children: [new Paragraph({ 
+                children: [new TextRun({ 
+                  text: cellText,
+                  bold: isHeader, // Bold for header
+                  color: isHeader ? "1E293B" : "334155" // Darker text for header
+                })],
+                alignment: AlignmentType.LEFT
+              })],
               width: { size: 100 / cells.length, type: WidthType.PERCENTAGE },
+              shading: isHeader ? {
+                fill: "F1F5F9", // Light Gray Header Background (Slate 100)
+                type: ShadingType.CLEAR,
+                color: "auto" 
+              } : undefined,
               borders: {
                 top: { style: BorderStyle.SINGLE, size: 4, color: "CBD5E1" },
                 bottom: { style: BorderStyle.SINGLE, size: 4, color: "CBD5E1" },
@@ -98,7 +109,7 @@ export const generateDocx = async (markdown: string, filename: string = "documen
         docChildren.push(new Table({
           rows: rows,
           width: { size: 100, type: WidthType.PERCENTAGE },
-          spacing: { before: 240, after: 240 }
+          // Spacing property removed as it's not supported in ITableOptions in this version of docx
         }));
       }
     }
@@ -120,17 +131,15 @@ export const generateDocx = async (markdown: string, filename: string = "documen
   // --- PARSING LOOP ---
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]; // Keep indentation for code blocks
+    const line = lines[i];
     const trimmed = line.trim();
 
     // 1. CODE BLOCKS (```)
     if (trimmed.startsWith('```')) {
       if (inCodeBlock) {
-        // End of code block
         flushCodeBlock();
       } else {
-        // Start of code block
-        if (inTable) flushTable(); // Close table if open
+        if (inTable) flushTable();
         inCodeBlock = true;
       }
       continue;
@@ -142,7 +151,6 @@ export const generateDocx = async (markdown: string, filename: string = "documen
     }
 
     // 2. TABLES
-    // Heuristic: Line starts with | and usually ends with |
     if (trimmed.startsWith('|')) {
       if (!inTable) inTable = true;
       tableRows.push(trimmed);
@@ -153,7 +161,6 @@ export const generateDocx = async (markdown: string, filename: string = "documen
 
     // 3. REGULAR CONTENT
     if (!trimmed) {
-      // Empty line
       docChildren.push(new Paragraph({ text: "" }));
       continue;
     }
@@ -161,19 +168,19 @@ export const generateDocx = async (markdown: string, filename: string = "documen
     // Heading 1-3
     if (line.startsWith('# ')) {
       docChildren.push(new Paragraph({
-        children: [new TextRun({ text: line.replace('# ', '') })],
+        children: [new TextRun({ text: line.replace('# ', ''), color: "0F172A" })], // Slate 900
         heading: HeadingLevel.HEADING_1,
         spacing: { before: 240, after: 120 },
       }));
     } else if (line.startsWith('## ')) {
       docChildren.push(new Paragraph({
-        children: [new TextRun({ text: line.replace('## ', '') })],
+        children: [new TextRun({ text: line.replace('## ', ''), color: "1E293B" })], // Slate 800
         heading: HeadingLevel.HEADING_2,
         spacing: { before: 240, after: 120 },
       }));
     } else if (line.startsWith('### ')) {
       docChildren.push(new Paragraph({
-        children: [new TextRun({ text: line.replace('### ', '') })],
+        children: [new TextRun({ text: line.replace('### ', ''), color: "334155" })], // Slate 700
         heading: HeadingLevel.HEADING_3,
         spacing: { before: 200, after: 100 },
       }));
@@ -188,9 +195,16 @@ export const generateDocx = async (markdown: string, filename: string = "documen
     // Blockquote
     else if (trimmed.startsWith('> ')) {
        docChildren.push(new Paragraph({
-        children: [new TextRun({ text: trimmed.replace('> ', ''), italics: true })],
-        indent: { left: 720 },
-        style: "Quote",
+        children: [new TextRun({ text: trimmed.replace('> ', ''), italics: true, color: "475569" })],
+        indent: { left: 400 }, // Slight indent
+        border: {
+           left: { style: BorderStyle.SINGLE, size: 24, color: "3B82F6" } // Blue Left Border
+        },
+        shading: {
+            fill: "EFF6FF", // Light Blue Background
+            type: ShadingType.CLEAR,
+        },
+        spacing: { before: 120, after: 120 }
       }));
     }
     // Normal Paragraph
@@ -202,7 +216,7 @@ export const generateDocx = async (markdown: string, filename: string = "documen
     }
   }
 
-  // Cleanup remaining buffers
+  // Cleanup
   if (inCodeBlock) flushCodeBlock();
   if (inTable) flushTable();
 
@@ -215,16 +229,9 @@ export const generateDocx = async (markdown: string, filename: string = "documen
         {
           id: "Normal",
           name: "Normal",
-          run: { size: 24, font: "Calibri" },
+          run: { size: 24, font: "Calibri", color: "334155" }, // Slate 700
           paragraph: { spacing: { line: 276 } },
         },
-        {
-          id: "Quote",
-          name: "Quote",
-          basedOn: "Normal",
-          next: "Normal",
-          run: { italics: true, color: "555555" }
-        }
       ],
     },
     sections: [{ children: docChildren }],
