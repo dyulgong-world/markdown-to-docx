@@ -62,6 +62,7 @@ export interface DocxStyleConfig {
     headerBackground: string;
     headerText: string;
     borderColor: string;
+    boldHeader: boolean;
   };
   blockquote: {
     background: string;
@@ -115,7 +116,8 @@ export const DEFAULT_STYLE_CONFIG: DocxStyleConfig = {
   table: {
     headerBackground: "#F1F5F9", // Slate 100
     headerText: "#1E293B",       // Slate 800
-    borderColor: "#CBD5E1"       // Slate 300
+    borderColor: "#CBD5E1",      // Slate 300
+    boldHeader: true
   },
   blockquote: {
     background: "#EFF6FF", // Blue 50

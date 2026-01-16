@@ -228,6 +228,7 @@ const StyleSettings: React.FC<StyleSettingsProps> = ({ config, onChange, onClose
           <div className="space-y-3 pl-3 border-l-2 border-slate-100">
              <div className="text-[10px] font-semibold text-slate-400 uppercase mb-1">Tables</div>
              <div className="grid gap-2">
+              <CheckboxInput label="Bold Header" checked={config.table.boldHeader} onChange={(v) => handleChange('table', 'boldHeader', v)} />
               <ColorInput label="Header Bg" value={config.table.headerBackground} onChange={(v) => handleChange('table', 'headerBackground', v)} />
               <ColorInput label="Header Text" value={config.table.headerText} onChange={(v) => handleChange('table', 'headerText', v)} />
               <ColorInput label="Borders" value={config.table.borderColor} onChange={(v) => handleChange('table', 'borderColor', v)} />
@@ -304,6 +305,20 @@ const SelectInput: React.FC<{ label: string; value: string; options: string[]; o
         <option key={opt} value={opt}>{opt}</option>
       ))}
     </select>
+  </div>
+);
+
+const CheckboxInput: React.FC<{ label: string; checked: boolean; onChange: (val: boolean) => void }> = ({ label, checked, onChange }) => (
+  <div className="flex items-center justify-between group">
+    <label className="text-xs text-slate-600 font-medium group-hover:text-slate-900 transition-colors cursor-pointer" onClick={() => onChange(!checked)}>{label}</label>
+    <div className="flex items-center">
+      <input 
+        type="checkbox" 
+        checked={checked} 
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+      />
+    </div>
   </div>
 );
 

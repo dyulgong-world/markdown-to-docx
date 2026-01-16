@@ -82,6 +82,7 @@ const Preview: React.FC<PreviewProps> = ({ content, visible, styleConfig }) => {
           color: ${table.headerText} !important; 
           border-color: ${table.borderColor} !important;
           font-size: ${sizes.tableHeader}pt !important;
+          font-weight: ${table.boldHeader ? 'bold' : 'normal'} !important;
         }
         .custom-preview td {
           border-color: ${table.borderColor} !important;

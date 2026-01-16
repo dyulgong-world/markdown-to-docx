@@ -330,8 +330,11 @@ const transformBlock = (node: any, config: DocxStyleConfig, imageMap: Map<string
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const cells = row.children.map((cell: any) => {
            // Pass overrides to children
+           // If header and boldHeader is enabled, set initial bold style
+           const initialStyle: TextStyle = (isHeader && config.table.boldHeader) ? { bold: true } : {};
+
            const cellContent = cell.children.flatMap((c: any) => 
-             transformInline(c, config, imageMap, {}, overrides)
+             transformInline(c, config, imageMap, initialStyle, overrides)
            );
            
            return new TableCell({
