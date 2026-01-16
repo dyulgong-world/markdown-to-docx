@@ -52,6 +52,7 @@ interface StyleOverrides {
   font?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   shading?: any;
+  size?: number;
 }
 
 // --- AST TRANSFORMER ---
@@ -68,6 +69,7 @@ const transformInline = (
   // Default values fall back to config body if no override provided
   const effectiveFont = overrides.font || config.font.body;
   const effectiveColor = overrides.color || getColor(config.typography.body);
+  const effectiveSize = overrides.size ? overrides.size * 2 : undefined; // Docx uses half-points
 
   switch (node.type) {
     case 'text':
@@ -78,7 +80,8 @@ const transformInline = (
         bold: style.bold,
         italics: style.italics,
         strike: style.strike,
-        shading: overrides.shading
+        shading: overrides.shading,
+        size: effectiveSize
       })];
     
     case 'emphasis': // Italic
@@ -139,7 +142,8 @@ const transformInline = (
           text: `[Image: ${node.alt || 'No Alt'}]`,
           color: "64748B",
           italics: true,
-          font: effectiveFont
+          font: effectiveFont,
+          size: effectiveSize
         })];
       }
 
@@ -320,8 +324,8 @@ const transformBlock = (node: any, config: DocxStyleConfig, imageMap: Map<string
         
         // Prepare overrides for header cells
         const overrides: StyleOverrides = isHeader 
-          ? { color: getColor(config.table.headerText) }
-          : {};
+          ? { color: getColor(config.table.headerText), size: config.sizes.tableHeader }
+          : { size: config.sizes.tableBody };
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const cells = row.children.map((cell: any) => {

@@ -139,6 +139,10 @@ const StyleSettings: React.FC<StyleSettingsProps> = ({ config, onChange, onClose
              <NumberInput label="Code" value={config.sizes.code} onChange={(v) => handleChange('sizes', 'code', v)} />
              <div className="col-span-1"></div> {/* Spacer */}
              
+             <NumberInput label="Table Head" value={config.sizes.tableHeader} onChange={(v) => handleChange('sizes', 'tableHeader', v)} />
+             <NumberInput label="Table Body" value={config.sizes.tableBody} onChange={(v) => handleChange('sizes', 'tableBody', v)} />
+             <div className="col-span-1"></div> {/* Spacer */}
+
              <NumberInput label="H1" value={config.sizes.heading1} onChange={(v) => handleChange('sizes', 'heading1', v)} />
              <NumberInput label="H2" value={config.sizes.heading2} onChange={(v) => handleChange('sizes', 'heading2', v)} />
              <NumberInput label="H3" value={config.sizes.heading3} onChange={(v) => handleChange('sizes', 'heading3', v)} />

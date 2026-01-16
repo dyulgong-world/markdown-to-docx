@@ -34,6 +34,8 @@ export interface DocxStyleConfig {
     heading6: number;
     body: number;
     code: number;
+    tableHeader: number;
+    tableBody: number;
   };
   typography: {
     heading1: string;
@@ -85,7 +87,9 @@ export const DEFAULT_STYLE_CONFIG: DocxStyleConfig = {
     heading5: 14,
     heading6: 12,
     body: 11,
-    code: 10
+    code: 10,
+    tableHeader: 11,
+    tableBody: 11
   },
   typography: {
     heading1: "#0F172A", // Slate 900

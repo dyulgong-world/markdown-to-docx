@@ -24,7 +24,7 @@ const Preview: React.FC<PreviewProps> = ({ content, visible, styleConfig }) => {
         .custom-preview h1, .custom-preview h2, .custom-preview h3, .custom-preview h4, .custom-preview h5, .custom-preview h6 { 
           font-family: '${font.heading}', sans-serif !important; 
         }
-        .custom-preview p, .custom-preview li, .custom-preview td, .custom-preview span, .custom-preview div { 
+        .custom-preview p, .custom-preview li, .custom-preview span, .custom-preview div { 
           font-family: '${font.body}', sans-serif !important; 
           font-size: ${sizes.body}pt !important;
         }
@@ -81,9 +81,11 @@ const Preview: React.FC<PreviewProps> = ({ content, visible, styleConfig }) => {
           background-color: ${table.headerBackground} !important; 
           color: ${table.headerText} !important; 
           border-color: ${table.borderColor} !important;
+          font-size: ${sizes.tableHeader}pt !important;
         }
         .custom-preview td {
           border-color: ${table.borderColor} !important;
+          font-size: ${sizes.tableBody}pt !important;
         }
 
         /* Blockquotes */

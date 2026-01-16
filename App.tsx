@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { ViewMode, DocxStyleConfig, DEFAULT_STYLE_CONFIG } from './types';
 import Editor from './components/Editor';
 import Preview from './components/Preview';
@@ -70,13 +70,46 @@ function add(a: number, b: number) {
 *Note: Image rendering depends on network access.*
 `;
 
+const STORAGE_KEY = 'docxStyleConfig';
+
 function App() {
   const [markdown, setMarkdown] = useState<string>(DEFAULT_MARKDOWN);
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.SPLIT);
   
-  // Style Config State
-  const [styleConfig, setStyleConfig] = useState<DocxStyleConfig>(DEFAULT_STYLE_CONFIG);
+  // Style Config State with LocalStorage Persistence
+  const [styleConfig, setStyleConfig] = useState<DocxStyleConfig>(() => {
+    if (typeof window === 'undefined') return DEFAULT_STYLE_CONFIG;
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Deep merge with defaults to ensure new fields are present if missing in saved config
+        return {
+          ...DEFAULT_STYLE_CONFIG,
+          ...parsed,
+          font: { ...DEFAULT_STYLE_CONFIG.font, ...parsed.font },
+          sizes: { ...DEFAULT_STYLE_CONFIG.sizes, ...parsed.sizes },
+          typography: { ...DEFAULT_STYLE_CONFIG.typography, ...parsed.typography },
+          codeBlock: { ...DEFAULT_STYLE_CONFIG.codeBlock, ...parsed.codeBlock },
+          inlineCode: { ...DEFAULT_STYLE_CONFIG.inlineCode, ...parsed.inlineCode },
+          list: { ...DEFAULT_STYLE_CONFIG.list, ...parsed.list },
+          table: { ...DEFAULT_STYLE_CONFIG.table, ...parsed.table },
+          blockquote: { ...DEFAULT_STYLE_CONFIG.blockquote, ...parsed.blockquote },
+          thematicBreak: { ...DEFAULT_STYLE_CONFIG.thematicBreak, ...parsed.thematicBreak },
+        };
+      }
+    } catch (e) {
+      console.warn("Failed to load style config from localStorage", e);
+    }
+    return DEFAULT_STYLE_CONFIG;
+  });
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Save to localStorage whenever config changes
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(styleConfig));
+  }, [styleConfig]);
 
   // Layout Logic
   const showEditor = viewMode === ViewMode.SPLIT || viewMode === ViewMode.EDITOR;
