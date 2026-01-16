@@ -205,23 +205,53 @@ const transformBlock = (node: any, config: DocxStyleConfig, imageMap: Map<string
       });
 
     case 'code':
-      // Block code
-      return [new Paragraph({
-        children: [new TextRun({
-          text: node.value,
-          font: config.font.code,
-          size: config.sizes.code * 2, // docx uses half-points
-          color: getColor(config.codeBlock.text)
-        })],
-        shading: { fill: getColor(config.codeBlock.background), type: ShadingType.CLEAR },
-        border: {
-          top: { style: BorderStyle.SINGLE, size: 1, color: getColor(config.codeBlock.background) },
-          bottom: { style: BorderStyle.SINGLE, size: 1, color: getColor(config.codeBlock.background) },
-          left: { style: BorderStyle.SINGLE, size: 1, color: getColor(config.codeBlock.background) },
-          right: { style: BorderStyle.SINGLE, size: 1, color: getColor(config.codeBlock.background) },
-        },
-        indent: { left: 200, right: 200 },
-        spacing: { before: 200, after: 200 }
+      // Block code as a Table for better visual separation and background handling
+      const lines = node.value ? node.value.split('\n') : [];
+      const codeRuns = lines.flatMap((line: string, i: number) => {
+        const runs = [
+          new TextRun({
+            text: line,
+            font: config.font.code,
+            size: config.sizes.code * 2,
+            color: getColor(config.codeBlock.text)
+          })
+        ];
+        // Add line break for all except last line to maintain structure
+        if (i < lines.length - 1) {
+          runs.push(new TextRun({ 
+            text: "",
+            break: 1,
+            font: config.font.code,
+            size: config.sizes.code * 2
+          }));
+        }
+        return runs;
+      });
+
+      return [new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                children: [
+                  new Paragraph({
+                    children: codeRuns.length > 0 ? codeRuns : [new TextRun({ text: "" })],
+                    spacing: { after: 0, before: 0 }
+                  })
+                ],
+                shading: { fill: getColor(config.codeBlock.background), type: ShadingType.CLEAR, color: "auto" },
+                borders: {
+                  top: { style: BorderStyle.SINGLE, size: 4, color: getColor(config.codeBlock.background) },
+                  bottom: { style: BorderStyle.SINGLE, size: 4, color: getColor(config.codeBlock.background) },
+                  left: { style: BorderStyle.SINGLE, size: 4, color: getColor(config.codeBlock.background) },
+                  right: { style: BorderStyle.SINGLE, size: 4, color: getColor(config.codeBlock.background) },
+                },
+                margins: { top: 200, bottom: 200, left: 200, right: 200 }, // ~10pt padding
+              })
+            ]
+          })
+        ]
       })];
 
     case 'thematicBreak': // Horizontal Rule
